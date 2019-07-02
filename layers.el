@@ -247,7 +247,8 @@ forms now, or specify their future evaluation dependencies unmet."
         (append prereq-features (mapcar (lambda (dep)
                                           (layers/generate-feature-name dep "setup")) deps)))
     (if (featurep (layers/generate-feature-name name "setup"))
-        (mapc 'eval body)
+        (dolist (form body)
+          (eval form))
       (layers//eval-after-load-all prereq-features
                                    `(progn ,@body
                                            (provide ',(layers/generate-feature-name name "setup")))))))
@@ -264,24 +265,30 @@ type-hash."
   "Schedule postsetup forms. TYPE is the :postsetup entry type and
 val is a list whose first element is the priority and whose
 second is the body of the :postsetup entry."
-  (if (string= type "nil-type")
-      (dolist (elem val)
-        (let ((body (cadr elem)))
-          (with-eval-after-load '-layers-setup-complete
-            (dolist (form body)
-              (eval form)))))
-    (let ((priority-exists? (layers/priority-existsp val)))
-      (dolist (elem val)
-        (let ((priority (car elem))
-              (body (cadr elem)))
-          (if (and priority-exists?
-                   priority)
-              (with-eval-after-load '-layers-setup-complete
-                (dolist (form body)
-                  (eval form)))
-            (with-eval-after-load '-layers-setup-complete
+  (dolist (elem val)
+    (let ((priority (car elem))
+          (body (nth 1 elem))
+          (dep (nth 2 elem))
+          (name (nth 3 elem)))
+      (if (featurep (layers/generate-feature-name name :postsetup))
+          (dolist (form body)
+            (eval form))
+        (if (string= type "nil-type")
+            (with-eval-after-load (layers/generate-feature-name name :setup)
               (dolist (form body)
-                (eval form)))))))))
+                (eval form))
+              (provide (layers/generate-feature-name name :postsetup)))
+          (let ((priority-exists? (layers/priority-existsp val)))
+            (if (and priority-exists?
+                     priority)
+                (with-eval-after-load (layers/generate-feature-name name :setup)
+                  (dolist (form body)
+                    (eval form))
+                  (provide (layers/generate-feature-name name :postsetup)))
+              (with-eval-after-load (layers/generate-feature-name name :setup)
+                (dolist (form body)
+                  (eval form))
+                (provide (layers/generate-feature-name name :postsetup))))))))))
 
 (defun layers-handler/:postsetup (hash body name)
   "Handles processing of the :postsetup body. HASH is the hash
@@ -296,15 +303,27 @@ of the form."
       (layers/add-prepostsetup-form-to-types-hash name form types-hash))
     (ht-map 'layers/schedule-postsetup-forms types-hash)))
 
-(defun layers-handler/:func (_hash body _name)
+(defun layers-handler/:func (_hash body name)
   ""
-  (with-eval-after-load '-layers-setup-complete
-    (mapc 'eval body)))
+  (if (featurep (layers/generate-feature-name name :func))
+      (dolist (form body)
+        (eval form))
+    (with-eval-after-load (layers/generate-feature-name name :postsetup)
+      (dolist (form body)
+        (eval form))
+      (provide (layers/generate-feature-name name :func))))
+  nil)
 
-(defun layers-handler/:customize (_hash body _name)
+(defun layers-handler/:customize (_hash body name)
   ""
-  (with-eval-after-load '-layers-setup-complete
-    (mapc 'eval body)))
+  (if (featurep (layers/generate-feature-name name :customize))
+      (dolist (form body)
+        (eval form))
+    (with-eval-after-load (layers/generate-feature-name name :func)
+      (dolist (form body)
+        (eval form))
+      (provide (layers/generate-feature-name name :customize))))
+  nil)
 
 (defun layers/add-stage-to-hash (name stage)
   "Take a single, wrapped stage and add it to the global
@@ -334,9 +353,22 @@ handlers. Ignore any undeclared layers."
              (not (featurep (layers/generate-feature-name name :setup))))
         (provide (layers/generate-feature-name name :presetup)))
     (layers//handle-keyword layer-hash :presetup (symbol-name name))
+
     (layers//handle-keyword layer-hash :setup (symbol-name name))
+
+    (if (and (not (layers/layer-defines-stage? name :postsetup))
+             (not (featurep (layers/generate-feature-name name :postsetup))))
+        (provide (layers/generate-feature-name name :postsetup)))
     (layers//handle-keyword layer-hash :postsetup (symbol-name name))
+
+    (if (and (not (layers/layer-defines-stage? name :func))
+             (not (featurep (layers/generate-feature-name name :func))))
+        (provide (layers/generate-feature-name name :func)))
     (layers//handle-keyword layer-hash :func (symbol-name name))
+
+    (if (and (not (layers/layer-defines-stage? name :customize))
+             (not (featurep (layers/generate-feature-name name :customize))))
+        (provide (layers/generate-feature-name name :customize)))
     (layers//handle-keyword layer-hash :customize (symbol-name name))))
 
 (defun layers/trim-trailing-keywords (content)
