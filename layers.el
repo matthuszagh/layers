@@ -77,8 +77,7 @@ declared through `declare-layers', they are simply ignored."
       (unless (-contains? layer-deps layer-name)
         (ht-set! (ht-get layers-hash layer-name) :depends layer-deps)))))
 
-;; TODO refactor to layers/feature-name?
-(defun layers/generate-feature-name (layer-name stage &optional type layer-dep)
+(defun layers/feature-name (layer-name stage &optional type layer-dep)
   "Generate a feature that can be used with `provide' or
 `with-eval-after-load'. LAYER-NAME is the name of the layer and
 STAGE is its stage. LAYER-DEP provides additional features for a
@@ -201,20 +200,20 @@ this :presetup stage occurs."
                 (dolist (i dep)
                   (setq dep-list (concat dep-list (symbol-name i) "-"))
                   (setq layer-dep-feature-list
-                        (append layer-dep-feature-list (list (layers/generate-feature-name i :setup)))))
+                        (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
                 (layers//eval-after-load-all
                  layer-dep-feature-list
-                 `(unless (featurep ',(layers/generate-feature-name name :setup))
+                 `(unless (featurep ',(layers/feature-name name :setup))
                     (dolist (form ',body)
                       (eval form))
-                    (provide ',(layers/generate-feature-name name :presetup type dep-list)))))
+                    (provide ',(layers/feature-name name :presetup type dep-list)))))
             ;; user supplied single layer
-            (with-eval-after-load (layers/generate-feature-name dep :setup)
+            (with-eval-after-load (layers/feature-name dep :setup)
               ;; don't want presetup body reevaluated each time setup is evaluated
-              (unless (featurep (layers/generate-feature-name name :setup))
+              (unless (featurep (layers/feature-name name :setup))
                 (dolist (form body)
                   (eval form))
-                (provide (layers/generate-feature-name name :presetup type dep)))))))
+                (provide (layers/feature-name name :presetup type dep)))))))
     (let ((priority-exists? (layers/priority-existsp val)))
       (dolist (elem val)
         (let ((priority (car elem))
@@ -232,36 +231,36 @@ this :presetup stage occurs."
                     (dolist (i dep)
                       (setq dep-list (concat dep-list (symbol-name i) "-"))
                       (setq layer-dep-feature-list
-                            (append layer-dep-feature-list (list (layers/generate-feature-name i :setup)))))
+                            (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
                     (layers//eval-after-load-all
                      layer-dep-feature-list
-                     `(unless (featurep ',(layers/generate-feature-name name :setup))
+                     `(unless (featurep ',(layers/feature-name name :setup))
                         (dolist (form ',body)
                           (eval form))
-                        (provide ',(layers/generate-feature-name name :presetup type dep-list)))))
-                (with-eval-after-load (layers/generate-feature-name dep :setup)
-                  (unless (featurep (layers/generate-feature-name name :setup))
+                        (provide ',(layers/feature-name name :presetup type dep-list)))))
+                (with-eval-after-load (layers/feature-name dep :setup)
+                  (unless (featurep (layers/feature-name name :setup))
                     (dolist (form body)
                       (eval form))
-                    (provide (layers/generate-feature-name name :presetup type dep)))))
+                    (provide (layers/feature-name name :presetup type dep)))))
             (if (consp dep)
                 (let ((layer-dep-feature-list '())
                       (dep-list ""))
                   (dolist (i dep)
                     (setq dep-list (concat dep-list (symbol-name i) "-"))
                     (setq layer-dep-feature-list
-                          (append layer-dep-feature-list (list (layers/generate-feature-name i :setup)))))
+                          (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
                   (layers//eval-after-load-all
                    layer-dep-feature-list
-                   `(unless (featurep ',(layers/generate-feature-name name :setup))
+                   `(unless (featurep ',(layers/feature-name name :setup))
                       (dolist (form ',body)
                         (eval form))
-                      (provide ',(layers/generate-feature-name name :presetup type dep-list)))))
-              (with-eval-after-load (layers/generate-feature-name dep :setup)
-                (unless (featurep (layers/generate-feature-name name :setup))
+                      (provide ',(layers/feature-name name :presetup type dep-list)))))
+              (with-eval-after-load (layers/feature-name dep :setup)
+                (unless (featurep (layers/feature-name name :setup))
                   (dolist (form body)
                     (eval form))
-                  (provide (layers/generate-feature-name name :presetup type dep)))))))))))
+                  (provide (layers/feature-name name :presetup type dep)))))))))))
 
 (defun layers-handler/:presetup (hash body name)
   "Handles processing of the :presetup body. HASH is the hash map
@@ -272,7 +271,7 @@ without a type) and value is a list whose first element is the
 priority (t or nil) and whose second element is wrapped body of
 the form."
   ;; only evaluate presetup once, before the setup has been evaluated
-  (unless (featurep (layers/generate-feature-name name :setup))
+  (unless (featurep (layers/feature-name name :setup))
     (let ((types-hash (ht ("nil-type" '()))))
       (dolist (form body)
         (layers/add-prepostsetup-form-to-types-hash name form types-hash))
@@ -292,13 +291,13 @@ the form."
                 (setq dep dep-list)))
           (setq presetup-type-deps-features
                 (append presetup-type-deps-features
-                        (list (layers/generate-feature-name name :presetup type dep)))))
+                        (list (layers/feature-name name :presetup type dep)))))
         (layers//eval-after-load-all presetup-type-deps-features
-                                     `(provide ',(layers/generate-feature-name name :presetup type)))
+                                     `(provide ',(layers/feature-name name :presetup type)))
         (setq presetup-type-features
-              (append presetup-type-features (list (layers/generate-feature-name name :presetup type)))))
+              (append presetup-type-features (list (layers/feature-name name :presetup type)))))
       (layers//eval-after-load-all presetup-type-features
-                                   `(provide ',(layers/generate-feature-name name :presetup))))))
+                                   `(provide ',(layers/feature-name name :presetup))))))
 
 (defun layers-handler/:setup (hash body name)
   "Schedule evaluation for :setup stage's BODY. HASH is the stage
@@ -308,17 +307,17 @@ forms now, or specify their future evaluation dependencies unmet."
     (layers-error (format (concat "mandatory :setup stage ommitted "
                                   "for layer %s") name)))
   (let ((deps (ht-get hash :depends))
-        (prereq-features (list (layers/generate-feature-name name "presetup"))))
+        (prereq-features (list (layers/feature-name name "presetup"))))
     (if deps
         (setq prereq-features
               (append prereq-features (mapcar (lambda (dep)
-                                                (layers/generate-feature-name dep "setup")) deps))))
-    (if (featurep (layers/generate-feature-name name "setup"))
+                                                (layers/feature-name dep "setup")) deps))))
+    (if (featurep (layers/feature-name name "setup"))
         (dolist (form body)
           (eval form))
       (layers//eval-after-load-all prereq-features
                                    `(progn ,@body
-                                           (provide ',(layers/generate-feature-name name "setup")))))))
+                                           (provide ',(layers/feature-name name "setup")))))))
 
 (defun layers/priority-existsp (type-hash-val)
   "Return t if any entries in a pre or postsetup for a given type
@@ -338,7 +337,7 @@ TODO there are more than 2 elements. Document them!"
           (body (nth 1 elem))
           (dep (nth 2 elem))
           (name (nth 3 elem)))
-      (if (featurep (layers/generate-feature-name name :postsetup))
+      (if (featurep (layers/feature-name name :postsetup))
           (dolist (form body)
             (eval form))
         (if (string= type "nil-type")
@@ -348,28 +347,28 @@ TODO there are more than 2 elements. Document them!"
                       (dolist (i dep)
                         (setq dep-feature-list
                               (append dep-feature-list
-                                      (list (layers/generate-feature-name i :setup)))))
+                                      (list (layers/feature-name i :setup)))))
                       (setq dep-feature-list
                             (append dep-feature-list
-                                    (list (layers/generate-feature-name name :setup))))
+                                    (list (layers/feature-name name :setup))))
                       (layers//eval-after-load-all
                        dep-feature-list
                        `(progn
                           (dolist (form ',body)
                             (eval form)
-                            (provide ',(layers/generate-feature-name name :postsetup))))))
+                            (provide ',(layers/feature-name name :postsetup))))))
                   (layers//eval-after-load-all
                    (append
-                    (list (layers/generate-feature-name name :setup))
-                    (list (layers/generate-feature-name dep :setup)))
+                    (list (layers/feature-name name :setup))
+                    (list (layers/feature-name dep :setup)))
                    `(progn
                       (dolist (form ',body)
                         (eval form)
-                        (provide ',(layers/generate-feature-name name :postsetup))))))
-              (with-eval-after-load (layers/generate-feature-name name :setup)
+                        (provide ',(layers/feature-name name :postsetup))))))
+              (with-eval-after-load (layers/feature-name name :setup)
                 (dolist (form body)
                   (eval form))
-                (provide (layers/generate-feature-name name :postsetup))))
+                (provide (layers/feature-name name :postsetup))))
           (let ((priority-exists? (layers/priority-existsp val)))
             (if (and priority-exists?
                      priority)
@@ -379,54 +378,54 @@ TODO there are more than 2 elements. Document them!"
                           (dolist (i dep)
                             (setq dep-feature-list
                                   (append dep-feature-list
-                                          (list (layers/generate-feature-name i :setup)))))
+                                          (list (layers/feature-name i :setup)))))
                           (setq dep-feature-list
                                 (append dep-feature-list
-                                        (list (layers/generate-feature-name name :setup))))
+                                        (list (layers/feature-name name :setup))))
                           (layers//eval-after-load-all
                            dep-feature-list
                            `(progn
                               (dolist (form ',body)
                                 (eval form)
-                                (provide ',(layers/generate-feature-name name :postsetup))))))
+                                (provide ',(layers/feature-name name :postsetup))))))
                       (layers//eval-after-load-all
                        (append
-                        (list (layers/generate-feature-name name :setup))
-                        (list (layers/generate-feature-name dep :setup)))
+                        (list (layers/feature-name name :setup))
+                        (list (layers/feature-name dep :setup)))
                        `(progn
                           (dolist (form ',body)
                             (eval form)
-                            (provide ',(layers/generate-feature-name name :postsetup))))))
-                  (with-eval-after-load (layers/generate-feature-name name :setup)
+                            (provide ',(layers/feature-name name :postsetup))))))
+                  (with-eval-after-load (layers/feature-name name :setup)
                     (dolist (form body)
                       (eval form))
-                    (provide (layers/generate-feature-name name :postsetup))))
+                    (provide (layers/feature-name name :postsetup))))
               (if dep
                   (if (consp dep)
                       (let ((dep-feature-list '()))
                         (dolist (i dep)
                           (setq dep-feature-list
                                 (append dep-feature-list
-                                        (list (layers/generate-feature-name i :setup)))))
+                                        (list (layers/feature-name i :setup)))))
                         (setq dep-feature-list
                               (append dep-feature-list
-                                      (list (layers/generate-feature-name name :setup))))
+                                      (list (layers/feature-name name :setup))))
                         (layers//eval-after-load-all
                          dep-feature-list
                          `(dolist (form ',body)
-                            (provide ',(layers/generate-feature-name name :postsetup)))))
+                            (provide ',(layers/feature-name name :postsetup)))))
                     (layers//eval-after-load-all
                      (append
-                      (list (layers/generate-feature-name name :setup))
-                      (list (layers/generate-feature-name dep :setup)))
+                      (list (layers/feature-name name :setup))
+                      (list (layers/feature-name dep :setup)))
                      `(progn
                         (dolist (form ',body)
                           (eval form)
-                          (provide ',(layers/generate-feature-name name :postsetup))))))
-                (with-eval-after-load (layers/generate-feature-name name :setup)
+                          (provide ',(layers/feature-name name :postsetup))))))
+                (with-eval-after-load (layers/feature-name name :setup)
                   (dolist (form body)
                     (eval form))
-                  (provide (layers/generate-feature-name name :postsetup)))))))))))
+                  (provide (layers/feature-name name :postsetup)))))))))))
 
 (defun layers-handler/:postsetup (hash body name)
   "Handles processing of the :postsetup body. HASH is the hash
@@ -443,24 +442,24 @@ of the form."
 
 (defun layers-handler/:func (_hash body name)
   ""
-  (if (featurep (layers/generate-feature-name name :func))
+  (if (featurep (layers/feature-name name :func))
       (dolist (form body)
         (eval form))
-    (with-eval-after-load (layers/generate-feature-name name :postsetup)
+    (with-eval-after-load (layers/feature-name name :postsetup)
       (dolist (form body)
         (eval form))
-      (provide (layers/generate-feature-name name :func))))
+      (provide (layers/feature-name name :func))))
   nil)
 
 (defun layers-handler/:customize (_hash body name)
   ""
-  (if (featurep (layers/generate-feature-name name :customize))
+  (if (featurep (layers/feature-name name :customize))
       (dolist (form body)
         (eval form))
-    (with-eval-after-load (layers/generate-feature-name name :func)
+    (with-eval-after-load (layers/feature-name name :func)
       (dolist (form body)
         (eval form))
-      (provide (layers/generate-feature-name name :customize))))
+      (provide (layers/feature-name name :customize))))
   nil)
 
 (defun layers/add-stage-to-hash (name stage)
@@ -490,8 +489,8 @@ handlers. Ignore any undeclared layers."
     (if (and (not (layers/layer-defines-stage? name :presetup))
              ;; providing presetup again if setup is already provided causes setup to be
              ;; evaluated multiple times.
-             (not (featurep (layers/generate-feature-name name :setup))))
-        (provide (layers/generate-feature-name name :presetup)))
+             (not (featurep (layers/feature-name name :setup))))
+        (provide (layers/feature-name name :presetup)))
     (layers//handle-keyword layer-hash :presetup (symbol-name name))
 
     (layers//handle-keyword layer-hash :setup (symbol-name name))
@@ -499,18 +498,18 @@ handlers. Ignore any undeclared layers."
     ;; if user doesn't supply postsetup and it hasn't been provided,
     ;; then provide a dummy postsetup. otherwise, handle it normally
     (if (and (not (layers/layer-defines-stage? name :postsetup))
-             (not (featurep (layers/generate-feature-name name :postsetup))))
-        (provide (layers/generate-feature-name name :postsetup)))
+             (not (featurep (layers/feature-name name :postsetup))))
+        (provide (layers/feature-name name :postsetup)))
     (layers//handle-keyword layer-hash :postsetup (symbol-name name))
 
     (if (and (not (layers/layer-defines-stage? name :func))
-             (not (featurep (layers/generate-feature-name name :func))))
-        (provide (layers/generate-feature-name name :func)))
+             (not (featurep (layers/feature-name name :func))))
+        (provide (layers/feature-name name :func)))
     (layers//handle-keyword layer-hash :func (symbol-name name))
 
     (if (and (not (layers/layer-defines-stage? name :customize))
-             (not (featurep (layers/generate-feature-name name :customize))))
-        (provide (layers/generate-feature-name name :customize)))
+             (not (featurep (layers/feature-name name :customize))))
+        (provide (layers/feature-name name :customize)))
     (layers//handle-keyword layer-hash :customize (symbol-name name))))
 
 (defun layers/trim-trailing-keywords (content)
