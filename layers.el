@@ -42,9 +42,9 @@ packages."
   :group 'layers)
 
 (defsubst layers-error (msg)
-  "Append layers: to the error message, so the error can be
+  "Append layers-error: to the error message, so the error can be
 tracked to this package."
-  (error "layers: %s" msg))
+  (error "%s" msg))
 
 (defvar layers--layer-names '())
 (defvar layers--unparsed-layers '())
