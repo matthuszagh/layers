@@ -51,6 +51,14 @@ tracked to this package."
 (defvar layers--layer-deps '())
 (defvar layers--layer-types '())
 
+;; issue warning if emacs initialization completes without setting up
+;; all layers.
+(add-hook 'after-init-hook
+          (lambda ()
+            (if layers--unparsed-layers
+                (dolist (layer layers--unparsed-layers)
+                  (layers-error (format "layer %s never completed setup" layer))))))
+
 (defvar layers-hash (ht)
   "Stores all layers and their contents. Each layer maps to a
 sub-hashmap that in turn contains a key for each defined stage
