@@ -187,7 +187,7 @@ postsetup."
             (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
     (layers//eval-after-load-all
      layer-dep-feature-list
-     `(unless (featurep ',(layers/feature-name name :setup))
+     `(unless (featurep ',(layers/feature-name name :presetup))
         ;; since we use an `eval-after-load' for each
         ;; dependent layer, we have to guard against executing
         ;; the body multiple times.
@@ -196,8 +196,6 @@ postsetup."
           (provide ',(layers/feature-name (concat name "-started") :presetup type dep-list))
           (dolist (form ',body)
             (eval form))
-          ;; TODO REMOVE THIS LINE
-          (message "%s presetup started" ,name)
           (provide ',(layers/feature-name name :presetup type dep-list)))))))
 
 (defun layers/schedule-presetup-forms (type val)
@@ -252,8 +250,8 @@ or nil) and whose second element is wrapped body of the form.
         (setq deps '())
         (setq presetup-type-deps-features '()) ; prerequisite features to provide presetup type features
         (dolist (dep (mapcar 'caddr (ht-get types-hash type)))
-          ;; TODO why is this here? i don't use it
-          ;; (setq deps (append deps (list dep)))
+          ;; TODO this should always be a list right? so test
+          ;; shouldn't be needed?
           (if (consp dep)
               (let ((dep-list ""))
                 (dolist (i dep)
@@ -291,10 +289,8 @@ forms now, or specify their future evaluation dependencies unmet."
        `(unless (featurep ',(layers/feature-name
                              (concat name "-started") :setup))
           (provide ',(layers/feature-name (concat name "-started") :setup))
-          ;; TODO REMOVE THIS LINE
-          (message "%s setup started" ,name)
           (progn ,@body
-                  (provide ',(layers/feature-name name "setup"))))))))
+                 (provide ',(layers/feature-name name "setup"))))))))
 
 (defun layers/priority-existsp (type-hash-val)
   "Return t if any entries in a pre or postsetup for a given type
@@ -304,6 +300,25 @@ type-hash."
     (if (car entry)
         t)))
 
+(defun layers/schedule-postsetup-after-dep-layers (type body deps name)
+  (let ((layer-dep-feature-list '())
+        (dep-list ""))
+    (dolist (i deps)
+      (setq dep-list (concat dep-list (symbol-name i) "-"))
+      (setq layer-dep-feature-list
+            (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
+    (setq layer-dep-feature-list (append layer-dep-feature-list
+                                         (list (layers/feature-name name :setup))))
+    (layers//eval-after-load-all
+     layer-dep-feature-list
+     `(unless (featurep ',(layers/feature-name name :postsetup))
+        (unless (featurep ',(layers/feature-name
+                             (concat name "-started") :postsetup type dep-list))
+          (provide ',(layers/feature-name (concat name "-started") :postsetup type dep-list))
+          (dolist (form ',body)
+            (eval form))
+          (provide ',(layers/feature-name name :postsetup type dep-list)))))))
+
 (defun layers/schedule-postsetup-forms (type val)
   "Schedule postsetup forms. TYPE is the :postsetup entry type and
 val is a list whose first element is the priority and whose
@@ -312,99 +327,20 @@ TODO there are more than 2 elements. Document them!"
   (dolist (elem val)
     (let ((priority (car elem))
           (body (nth 1 elem))
-          (dep (nth 2 elem))
+          (deps (nth 2 elem))
           (name (nth 3 elem)))
       (if (featurep (layers/feature-name name :postsetup))
           (dolist (form body)
             (eval form))
         (if (string= type "nil-type")
-            (if dep
-                (if (consp dep)
-                    (let ((dep-feature-list '()))
-                      (dolist (i dep)
-                        (setq dep-feature-list
-                              (append dep-feature-list
-                                      (list (layers/feature-name i :setup)))))
-                      (setq dep-feature-list
-                            (append dep-feature-list
-                                    (list (layers/feature-name name :setup))))
-                      (layers//eval-after-load-all
-                       dep-feature-list
-                       `(progn
-                          (dolist (form ',body)
-                            (eval form)
-                            (provide ',(layers/feature-name name :postsetup))))))
-                  (layers//eval-after-load-all
-                   (append
-                    (list (layers/feature-name name :setup))
-                    (list (layers/feature-name dep :setup)))
-                   `(progn
-                      (dolist (form ',body)
-                        (eval form)
-                        (provide ',(layers/feature-name name :postsetup))))))
-              (with-eval-after-load (layers/feature-name name :setup)
-                (dolist (form body)
-                  (eval form))
-                (provide (layers/feature-name name :postsetup))))
+            (layers/schedule-postsetup-after-dep-layers type body deps name)
           (let ((priority-exists? (layers/priority-existsp val)))
             (if (and priority-exists?
                      priority)
-                (if dep
-                    (if (consp dep)
-                        (let ((dep-feature-list '()))
-                          (dolist (i dep)
-                            (setq dep-feature-list
-                                  (append dep-feature-list
-                                          (list (layers/feature-name i :setup)))))
-                          (setq dep-feature-list
-                                (append dep-feature-list
-                                        (list (layers/feature-name name :setup))))
-                          (layers//eval-after-load-all
-                           dep-feature-list
-                           `(progn
-                              (dolist (form ',body)
-                                (eval form)
-                                (provide ',(layers/feature-name name :postsetup))))))
-                      (layers//eval-after-load-all
-                       (append
-                        (list (layers/feature-name name :setup))
-                        (list (layers/feature-name dep :setup)))
-                       `(progn
-                          (dolist (form ',body)
-                            (eval form)
-                            (provide ',(layers/feature-name name :postsetup))))))
-                  (with-eval-after-load (layers/feature-name name :setup)
-                    (dolist (form body)
-                      (eval form))
-                    (provide (layers/feature-name name :postsetup))))
-              (if dep
-                  (if (consp dep)
-                      (let ((dep-feature-list '()))
-                        (dolist (i dep)
-                          (setq dep-feature-list
-                                (append dep-feature-list
-                                        (list (layers/feature-name i :setup)))))
-                        (setq dep-feature-list
-                              (append dep-feature-list
-                                      (list (layers/feature-name name :setup))))
-                        (layers//eval-after-load-all
-                         dep-feature-list
-                         `(dolist (form ',body)
-                            (provide ',(layers/feature-name name :postsetup)))))
-                    (layers//eval-after-load-all
-                     (append
-                      (list (layers/feature-name name :setup))
-                      (list (layers/feature-name dep :setup)))
-                     `(progn
-                        (dolist (form ',body)
-                          (eval form)
-                          (provide ',(layers/feature-name name :postsetup))))))
-                (with-eval-after-load (layers/feature-name name :setup)
-                  (dolist (form body)
-                    (eval form))
-                  (provide (layers/feature-name name :postsetup)))))))))))
+                (layers/schedule-postsetup-after-dep-layers type body deps name)
+              (layers/schedule-postsetup-after-dep-layers type body deps name))))))))
 
-(defun layers-handler/:postsetup (hash body name)
+(defun layers-handler/:postsetup (hash body layer-name)
   "Handles processing of the :postsetup body. HASH is the hash
 map for the current layer and BODY is :postsetup's wrapped
 body. Handle processing by first constructing a `types-hash'
@@ -414,8 +350,31 @@ priority (t or nil) and whose second element is the wrapped body
 of the form."
   (let ((types-hash (ht ("nil-type" '()))))
     (dolist (form body)
-      (layers/add-prepostsetup-form-to-types-hash name form types-hash))
-    (ht-map 'layers/schedule-postsetup-forms types-hash)))
+      (layers/add-prepostsetup-form-to-types-hash layer-name form types-hash))
+    (ht-map 'layers/schedule-postsetup-forms types-hash)
+    (setq postsetup-types (ht-keys types-hash))
+    (setq postsetup-type-features '()) ; prerequisite features to provide postsetup
+    (dolist (type postsetup-types)
+      (setq deps '())
+      (setq postsetup-type-deps-features '()) ; prerequisite features to provide postsetup type features
+      (dolist (dep (mapcar 'caddr (ht-get types-hash type)))
+        ;; TODO this should always be a list right? so test
+        ;; shouldn't be needed?
+        (if (consp dep)
+            (let ((dep-list ""))
+              (dolist (i dep)
+                (setq dep-list (concat dep-list (symbol-name i) "-")))
+              (setq dep dep-list)))
+        (setq postsetup-type-deps-features
+              (append postsetup-type-deps-features
+                      (list (layers/feature-name layer-name :postsetup type dep)))))
+      ;; TODO do these need guards?
+      (layers//eval-after-load-all postsetup-type-deps-features
+                                   `(provide ',(layers/feature-name layer-name :postsetup type)))
+      (setq postsetup-type-features
+            (append postsetup-type-features (list (layers/feature-name layer-name :postsetup type)))))
+    (layers//eval-after-load-all postsetup-type-features
+                                 `(provide ',(layers/feature-name layer-name :postsetup)))))
 
 (defun layers-handler/:func (_hash body name)
   ""
