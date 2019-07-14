@@ -143,13 +143,7 @@ provided."
 where the first element of the list is the priority (t or nil),
 the second element is the body of the FORM and the 3rd element is
 the layer dependency. FORM is a single entry in the pre or
-postsetup. It has the format
-
-;; (:layer layer-name &optional type priority
-;;  (body...))
-
-Where body consists of 1 or more sexps.
-"
+postsetup."
   (unless (keywordp (car form))
     (layers-error (concat "all pre and postsetup forms must "
                           "specify a layer using "
@@ -158,26 +152,17 @@ Where body consists of 1 or more sexps.
         (rest (cddr form))
         (type "nil-type")
         (priority nil))
-    (if (consp layer) ; user supplied a list of layers
-        (let ((all-layers-used? t))
-          (dolist (l layer)
-            (setq all-layers-used? (and (ht-get layers-hash l) all-layers-used?)))
-          (if all-layers-used?
-              (progn
-                (unless (consp (car rest)) ; check if type set
-                  (setq type (car rest))
-                  (setq rest (cdr rest))
-                  (unless (consp (cadr rest)) ; check if priority set
-                    (setq priority (cadr rest))
-                    (setq rest (cddr rest))))
-                (unless (ht-get types-hash type)
-                  (ht-set! types-hash type '()))
-                (ht-set! types-hash type
-                         (append (ht-get types-hash type) (list `(,priority ,rest ,layer ,name)))))))
-      ;; user supplied single layer
-      ;; TODO refactor this code, it's basically identical to the list logic.
-      ;; just wrap a single layer as a list and apply the same logic to both cases.
-      (if (ht-get layers-hash layer) ; filter unused layers
+    ;; if single layer dependency is provided and it isn't wrapped,
+    ;; wrap it so we can treat all cases uniformly as a list of layer
+    ;; dependencies.
+    (unless (consp layer)
+      (setq layer (list layer)))
+    ;; ignore layer form if any layer dependencies were not declared
+    ;; with `declare-layers'.
+    (let ((all-layers-used? t))
+      (dolist (l layer)
+        (setq all-layers-used? (and (ht-get layers-hash l) all-layers-used?)))
+      (if all-layers-used?
           (progn
             (unless (consp (car rest)) ; check if type set
               (setq type (car rest))
@@ -190,99 +175,76 @@ Where body consists of 1 or more sexps.
             (ht-set! types-hash type
                      (append (ht-get types-hash type) (list `(,priority ,rest ,layer ,name)))))))))
 
+(defun layers/schedule-presetup-after-dep-layers (type body deps name)
+  (let ((layer-dep-feature-list '())
+        ;; turn deps list into hyphen-separated list of
+        ;; features. this makes it easier to turn the
+        ;; dependency layer list into a feature name.
+        (dep-list ""))
+    (dolist (i deps)
+      (setq dep-list (concat dep-list (symbol-name i) "-"))
+      (setq layer-dep-feature-list
+            (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
+    (layers//eval-after-load-all
+     layer-dep-feature-list
+     `(unless (featurep ',(layers/feature-name name :setup))
+        ;; since we use an `eval-after-load' for each
+        ;; dependent layer, we have to guard against executing
+        ;; the body multiple times.
+        (unless (featurep ',(layers/feature-name
+                             (concat name "-started") :presetup type dep-list))
+          (provide ',(layers/feature-name (concat name "-started") :presetup type dep-list))
+          (dolist (form ',body)
+            (eval form))
+          ;; TODO REMOVE THIS LINE
+          (message "%s presetup started" ,name)
+          (provide ',(layers/feature-name name :presetup type dep-list)))))))
+
 (defun layers/schedule-presetup-forms (type val)
   "Schedule presetup forms. TYPE is the :presetup entry type and
 val is a list whose first element is the priority and whose
 second is the body of the :presetup entry. The third is the
-dependency layer and the fourth is the name of the layer where
-this :presetup stage occurs."
+dependency layer list and the fourth is the name of the layer
+where this :presetup stage occurs.
+
+TODO I don't like the data format for types-hash. It seems a bit
+like a random amalgamation."
   ;; unconditionally evaluate all entries w/o conflict
   (if (string= type "nil-type")
       (dolist (elem val)
         (let ((body (cadr elem))
-              (dep (caddr elem))
+              (deps (caddr elem))
               (name (cadddr elem)))
-          (if (consp dep) ; user supplied list of layers
-              (let ((layer-dep-feature-list '())
-                    (dep-list "")) ; turn dep list into hyphen-separated list of features
-                (dolist (i dep)
-                  (setq dep-list (concat dep-list (symbol-name i) "-"))
-                  (setq layer-dep-feature-list
-                        (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
-                (layers//eval-after-load-all
-                 layer-dep-feature-list
-                 `(unless (featurep ',(layers/feature-name name :setup))
-                    (dolist (form ',body)
-                      (eval form))
-                    (provide ',(layers/feature-name name :presetup type dep-list)))))
-            ;; user supplied single layer
-            (with-eval-after-load (layers/feature-name dep :setup)
-              ;; don't want presetup body reevaluated each time setup is evaluated
-              (unless (featurep (layers/feature-name name :setup))
-                (dolist (form body)
-                  (eval form))
-                (provide (layers/feature-name name :presetup type dep)))))))
+          (layers/schedule-presetup-after-dep-layers type body deps name)))
     (let ((priority-exists? (layers/priority-existsp val)))
       (dolist (elem val)
         (let ((priority (car elem))
               (body (cadr elem))
-              (dep (caddr elem))
+              (deps (caddr elem))
               (name (cadddr elem)))
           ;; if at least one entry has set priority, only evaluate entries with priority.
           ;; otherwise, evaluate all entries.
           ;; TODO code needs major refactoring, most of it is identical
           (if (and priority-exists?
                    priority)
-              (if (consp dep)
-                  (let ((layer-dep-feature-list '())
-                        (dep-list ""))
-                    (dolist (i dep)
-                      (setq dep-list (concat dep-list (symbol-name i) "-"))
-                      (setq layer-dep-feature-list
-                            (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
-                    (layers//eval-after-load-all
-                     layer-dep-feature-list
-                     `(unless (featurep ',(layers/feature-name name :setup))
-                        (dolist (form ',body)
-                          (eval form))
-                        (provide ',(layers/feature-name name :presetup type dep-list)))))
-                (with-eval-after-load (layers/feature-name dep :setup)
-                  (unless (featurep (layers/feature-name name :setup))
-                    (dolist (form body)
-                      (eval form))
-                    (provide (layers/feature-name name :presetup type dep)))))
-            (if (consp dep)
-                (let ((layer-dep-feature-list '())
-                      (dep-list ""))
-                  (dolist (i dep)
-                    (setq dep-list (concat dep-list (symbol-name i) "-"))
-                    (setq layer-dep-feature-list
-                          (append layer-dep-feature-list (list (layers/feature-name i :setup)))))
-                  (layers//eval-after-load-all
-                   layer-dep-feature-list
-                   `(unless (featurep ',(layers/feature-name name :setup))
-                      (dolist (form ',body)
-                        (eval form))
-                      (provide ',(layers/feature-name name :presetup type dep-list)))))
-              (with-eval-after-load (layers/feature-name dep :setup)
-                (unless (featurep (layers/feature-name name :setup))
-                  (dolist (form body)
-                    (eval form))
-                  (provide (layers/feature-name name :presetup type dep)))))))))))
+              (layers/schedule-presetup-after-dep-layers type body deps name)
+            (layers/schedule-presetup-after-dep-layers type body deps name)))))))
 
-(defun layers-handler/:presetup (hash body name)
+(defun layers-handler/:presetup (hash body layer-name)
   "Handles processing of the :presetup body. HASH is the hash map
 for the current layer and BODY is :presetup's wrapped
-body. Handle processing by first constructing a `types-hash'
-where the key is the type of each form ('nil-type' for forms
-without a type) and value is a list whose first element is the
-priority (t or nil) and whose second element is wrapped body of
-the form."
-  ;; only evaluate presetup once, before the setup has been evaluated
-  (unless (featurep (layers/feature-name name :setup))
+body. LAYER-NAME is the layer's name. Handle processing by first
+constructing a `types-hash' where the key is the type of each
+form and value is a list whose first element is the priority (t
+or nil) and whose second element is wrapped body of the form.
+"
+  ;; only evaluate presetup once, before setup has been evaluated
+  (unless (featurep (layers/feature-name layer-name :setup))
+    ;; any presetup forms that omit a conflict type get a default
+    ;; `"nil-type"'
     (let ((types-hash (ht ("nil-type" '()))))
       (dolist (form body)
-        (layers/add-prepostsetup-form-to-types-hash name form types-hash))
+        (layers/add-prepostsetup-form-to-types-hash layer-name form types-hash))
       (ht-map 'layers/schedule-presetup-forms types-hash)
       (setq presetup-types (ht-keys types-hash))
       (setq presetup-type-features '()) ; prerequisite features to provide presetup
@@ -299,13 +261,14 @@ the form."
                 (setq dep dep-list)))
           (setq presetup-type-deps-features
                 (append presetup-type-deps-features
-                        (list (layers/feature-name name :presetup type dep)))))
+                        (list (layers/feature-name layer-name :presetup type dep)))))
+        ;; TODO do these need guards?
         (layers//eval-after-load-all presetup-type-deps-features
-                                     `(provide ',(layers/feature-name name :presetup type)))
+                                     `(provide ',(layers/feature-name layer-name :presetup type)))
         (setq presetup-type-features
-              (append presetup-type-features (list (layers/feature-name name :presetup type)))))
+              (append presetup-type-features (list (layers/feature-name layer-name :presetup type)))))
       (layers//eval-after-load-all presetup-type-features
-                                   `(provide ',(layers/feature-name name :presetup))))))
+                                   `(provide ',(layers/feature-name layer-name :presetup))))))
 
 (defun layers-handler/:setup (hash body name)
   "Schedule evaluation for :setup stage's BODY. HASH is the stage
@@ -323,9 +286,15 @@ forms now, or specify their future evaluation dependencies unmet."
     (if (featurep (layers/feature-name name "setup"))
         (dolist (form body)
           (eval form))
-      (layers//eval-after-load-all prereq-features
-                                   `(progn ,@body
-                                           (provide ',(layers/feature-name name "setup")))))))
+      (layers//eval-after-load-all
+       prereq-features
+       `(unless (featurep ',(layers/feature-name
+                             (concat name "-started") :setup))
+          (provide ',(layers/feature-name (concat name "-started") :setup))
+          ;; TODO REMOVE THIS LINE
+          (message "%s setup started" ,name)
+          (progn ,@body
+                  (provide ',(layers/feature-name name "setup"))))))))
 
 (defun layers/priority-existsp (type-hash-val)
   "Return t if any entries in a pre or postsetup for a given type
@@ -480,45 +449,43 @@ add."
         (ht-set! (ht-get layers-hash name) stage-name (car stage-body))
       (ht-set! (ht-get layers-hash name) stage-name stage-body))))
 
-(defmacro layers//handle-keyword (hash key name)
+(defmacro layers//handle-keyword (hash key layer-name)
   ""
   (let ((val `(ht-get ,hash ,key)))
     `(,(intern (concat "layers-handler/"
-                       (symbol-name key))) ,hash ,val ,name)))
+                       (symbol-name key))) ,hash ,val ,layer-name)))
 
-(defun layers/process-keywords-from-hash (name)
-  "Pass all keyword arguments for layer NAME to their respective
+(defun layers/process-keywords-from-hash (layer-name)
+  "Pass all keyword arguments for layer LAYER-NAME to their respective
 handlers. Ignore any undeclared layers."
-  (setq layers--unparsed-layers (-remove-item name layers--unparsed-layers))
-  (unless layers--unparsed-layers
-    (provide '-layers-setup-complete))
-  (let ((layer-hash (ht-get layers-hash name)))
+  (setq layers--unparsed-layers (-remove-item layer-name layers--unparsed-layers))
+  (let ((layer-hash (ht-get layers-hash layer-name)))
     ;; :setup will only proceed after :presetup is complete
-    (if (and (not (layers/layer-defines-stage? name :presetup))
+    (if (and (not (layers/layer-defines-stage? layer-name :presetup))
              ;; providing presetup again if setup is already provided causes setup to be
              ;; evaluated multiple times.
-             (not (featurep (layers/feature-name name :setup))))
-        (provide (layers/feature-name name :presetup)))
-    (layers//handle-keyword layer-hash :presetup (symbol-name name))
+             (not (featurep (layers/feature-name layer-name :setup))))
+        (provide (layers/feature-name layer-name :presetup)))
+    (layers//handle-keyword layer-hash :presetup (symbol-name layer-name))
 
-    (layers//handle-keyword layer-hash :setup (symbol-name name))
+    (layers//handle-keyword layer-hash :setup (symbol-name layer-name))
 
     ;; if user doesn't supply postsetup and it hasn't been provided,
     ;; then provide a dummy postsetup. otherwise, handle it normally
-    (if (and (not (layers/layer-defines-stage? name :postsetup))
-             (not (featurep (layers/feature-name name :postsetup))))
-        (provide (layers/feature-name name :postsetup)))
-    (layers//handle-keyword layer-hash :postsetup (symbol-name name))
+    (if (and (not (layers/layer-defines-stage? layer-name :postsetup))
+             (not (featurep (layers/feature-name layer-name :postsetup))))
+        (provide (layers/feature-name layer-name :postsetup)))
+    (layers//handle-keyword layer-hash :postsetup (symbol-name layer-name))
 
-    (if (and (not (layers/layer-defines-stage? name :func))
-             (not (featurep (layers/feature-name name :func))))
-        (provide (layers/feature-name name :func)))
-    (layers//handle-keyword layer-hash :func (symbol-name name))
+    (if (and (not (layers/layer-defines-stage? layer-name :func))
+             (not (featurep (layers/feature-name layer-name :func))))
+        (provide (layers/feature-name layer-name :func)))
+    (layers//handle-keyword layer-hash :func (symbol-name layer-name))
 
-    (if (and (not (layers/layer-defines-stage? name :customize))
-             (not (featurep (layers/feature-name name :customize))))
-        (provide (layers/feature-name name :customize)))
-    (layers//handle-keyword layer-hash :customize (symbol-name name))))
+    (if (and (not (layers/layer-defines-stage? layer-name :customize))
+             (not (featurep (layers/feature-name layer-name :customize))))
+        (provide (layers/feature-name layer-name :customize)))
+    (layers//handle-keyword layer-hash :customize (symbol-name layer-name))))
 
 (defun layers/trim-trailing-keywords (content)
   "Returns the full body of a stage by getting rid of everything
@@ -550,33 +517,86 @@ single form.
         (setq content (cdr content))))
     body))
 
-(defun layers/add-to-layers-hash (name stages)
-  "Process STAGES and add the contents to the global
+(defun layers/add-to-layers-hash (name body)
+  "Process BODY and add the contents to the global
 `layers-hash'. NAME is the layer name."
-  (while (car stages)
-    (while (and (car stages)
-                (not (keywordp (car stages))))
-      (setq stages (cdr stages)))
-    (setq wrapped-stage (append (list (car stages))
-                                (layers/trim-trailing-keywords (cdr stages))))
-    (layers/add-stage-to-hash name wrapped-stage)
-    (setq stages (cdr stages))))
-
-(defun layers/ensure-stages-format (stages)
-  "Ensure that STAGES have the correct format. Otherwise, trigger
-an error."
-  (unless (keywordp (car stages))
+  ;; ensure at least one stage keyword is used
+  (unless (keywordp (car body))
     (layers-error (format (concat "the first element must be a keyword. "
-                                  "%s is not a keyword.") (car stages)))))
+                                  "%s is not a keyword.") (car body))))
+  (while (car body)
+    (while (and (car body)
+                (not (keywordp (car body))))
+      (setq body (cdr body)))
+    (setq wrapped-stage (append (list (car body))
+                                (layers/trim-trailing-keywords (cdr body))))
+    (layers/add-stage-to-hash name wrapped-stage)
+    (setq body (cdr body))))
 
 ;;;###autoload
-(defmacro layer-def (name &rest stages)
-  ""
+(defmacro layer-def (name &rest body)
+  "
+TODO general documentation
+TODO :deps
+TODO :conflicts
+
+:presetup stages are composed of one or more layer
+forms. Each layer form has the form
+
+(:layer names [conflict [priority]]
+ bodies)
+
+where names can either be a single name without parentheses, or
+with parentheses:
+
+(:layer a
+ bodies)
+--or--
+(:layer (a)
+ bodies)
+
+Using a single name sets a dependency on a single layer. It is
+also possible to use multiple layers names, in which case they
+must be wrapped in parentheses, e.g.
+
+(:layer (a b)
+ bodies)
+
+Nested lists (e.g. `(a (b))') are not supported and would be
+meaningless anyway.
+
+`bodies' consists of one or more valid sexps. For instance,
+
+(:layer (a b)
+ (setq foo bar))
+--and--
+(:layer (a b)
+ (setq foo bar)
+ (use-package bar))
+
+are both valid. These are passed to Emacs for evaluation so
+anything invalid to Emacs is invalid here, and any valid Emacs
+expression should be valid here.
+
+Multiple layer forms can be used. To do this, simply place one
+after another like so:
+
+:presetup
+(:layer names1
+ bodies1)
+(:layer names2
+ bodies2)
+...
+
+TODO :setup
+TODO :postsetup
+TODO :customize
+TODO :func
+"
   (declare (indent 1))
   (if (-contains? layers--layer-names name)
       (progn
-        (layers/ensure-stages-format stages)
-        (layers/add-to-layers-hash name stages)
+        (layers/add-to-layers-hash name body)
         (layers/process-keywords-from-hash name))))
 
 (provide 'layers)
