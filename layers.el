@@ -1,4 +1,4 @@
-;;; layers.el --- Main file -*-lexical-binding: t;-*-
+;;; layers.el --- Layers -*-lexical-binding: t;-*-
 
 ;;; Commentary:
 ;;
