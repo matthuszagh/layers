@@ -3,24 +3,16 @@
 If a list is given, must match all layers.
 
 ** TODO display warning message if init loaded without all layers
-There's a particular concern that dependencies between ~define-layer~
-and ~use-package~ might conflict in an impossible way. Reporting
-unloaded layers is a start. Even better would be to also report unmet
-dependencies. /Maybe/ also suggest dependency conflicts between this and
-~use-package~.
+There's a particular concern that dependencies between ~define-layer~ and ~use-package~ might conflict in an impossible way. Reporting unloaded layers is a start. Even better would be to also report unmet dependencies. /Maybe/ also suggest dependency conflicts between this and ~use-package~.
 
 ** TODO get rid of :conflicts?
-Will it be clearer to people not to make this declarative? Instead,
-only specification is when it's used?
+Will it be clearer to people not to make this declarative? Instead, only specification is when it's used?
 
 ** TODO Consider adding :exclusive
-This would trigger an error if any package from the supplied list is
-loaded. This can be useful when multiple layers are mutually exclusive
-(think themes).
+This would trigger an error if any package from the supplied list is loaded. This can be useful when multiple layers are mutually exclusive (think themes).
 
 ** HOLD beta layers
-This is a variable that provides zero functionality but makes it
-easier to keep track of layers that you'd like to get working.
+This is a variable that provides zero functionality but makes it easier to keep track of layers that you'd like to get working.
 ** HOLD automated dummy testing data
 ERC?
 * presetups for package management
@@ -32,72 +24,38 @@ scenario 1:
 4. declare-dummy-layer straight
 5. define-layers with presetup deps on straight
 
-to use the package manager within a define-layers I would need to get
-layers outside of package management. that's a bad
-solution. alternatively, i could allow a function that sets something
-as a dummy layer. place it within a ~with-eval-after-load~ or something
-similar so that it's only used if the package management layer loaded.
+to use the package manager within a define-layers I would need to get layers outside of package management. that's a bad solution. alternatively, i could allow a function that sets something as a dummy layer. place it within a ~with-eval-after-load~ or something similar so that it's only used if the package management layer loaded.
 
 scenario 2:
 1. require use package
 2. use package layers
 3. layer definitions...
 
-
-
-
-
-
-
 * pre/postsetup scheduling
-(:layer a conflict1 t
- (body 1))
-(:layer b conflict1 nil
- (body 2))
-(:layer c
- (body 3))
+(:layer a conflict1 t (body 1)) (:layer b conflict1 nil (body 2)) (:layer c (body 3))
 
-(conflict1, '((t ((body 1)) a name) (nil ((body 2)) b name)))
-(nil-type, '((nil ((body 3)) c name)))
+(conflict1, '((t ((body 1)) a name) (nil ((body 2)) b name))) (nil-type, '((nil ((body 3)) c name)))
 
-before provide presetup:
-(provide 'layers-name-presetup-conflict1)
-(provide 'layers-name-presetup-nil-type)
-----> i.e. provide all conflicts
+before provide presetup: (provide 'layers-name-presetup-conflict1) (provide 'layers-name-presetup-nil-type) ----> i.e. provide all conflicts
 
-before (provide 'layers-name-presetup-conflict1):
-(provide 'layers-name-presetup-conflict1-a)
-(provide 'layers-name-presetup-conflict1-b)
-----> i.e. provide all conflict layer deps
+before (provide 'layers-name-presetup-conflict1): (provide 'layers-name-presetup-conflict1-a) (provide 'layers-name-presetup-conflict1-b) ----> i.e. provide all conflict layer deps
 
 ** possible forms
-(:layer /layers/ [conflict [priority]]
- /body/)
+(:layer /layers/ [conflict [priority]] /body/)
 
-/layers/ : a, (a), (a b ...)
-/body/   : one or more sexps, i.e.:
-(body)
--- or --
-(body1)
-(body2) ...
+/layers/ : a, (a), (a b ...)  /body/ : one or more sexps, i.e.: (body) -- or -- (body1) (body2) ...
 
-for layers, check if consp, if not wrap it. then process them all
-identically as list (can be list of 1 element). wrap all bodies
-regardless.
+for layers, check if consp, if not wrap it. then process them all identically as list (can be list of 1 element). wrap all bodies regardless.
 
 * evaluation
-:presetup should only be evaluated once before the setup stage. Setup,
-postsetup config and func should be evaluated each time.
+:presetup should only be evaluated once before the setup stage. Setup, postsetup config and func should be evaluated each time.
 
-doesn't define presetup
-setup not already loaded
+doesn't define presetup setup not already loaded
 
-(if (and (not defines-stage)
-         (not setup-loaded)))
+(if (and (not defines-stage) (not setup-loaded)))
 
 * general program flow
 ** first declare layers and base layers
 ** encounter ~define-layer~
 ** ignore any undeclared layers
 ** check that first word is a stage keyword
-**
